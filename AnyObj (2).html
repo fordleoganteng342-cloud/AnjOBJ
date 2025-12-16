@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>AI Object Scanner</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #000;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+            height: 100vh;
+            height: 100dvh;
+        }
+
+        #videoContainer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            z-index: 1;
+        }
+
+        #video {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: cover;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* Loading Screen */
+        #loadingScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            color: white;
+        }
+
+        .loader {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* UI Overlay */
+        #uiOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            transition: opacity 0.3s ease;
+        }
+
+        #uiOverlay.hidden {
+            opacity: 0;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: env(safe-area-inset-top, 20px) 20px 20px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            pointer-events: all;
+        }
+
+        .fps-badge {
+            background: rgba(16, 185, 129, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+        }
+
+        .camera-switch {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 25px;
+            font-size: 24px;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .camera-switch:active {
+            transform: scale(0.9);
+            background: rgba(255,255,255,0.3);
+        }
+
+        /* Center Detection Area */
+        .detection-zone {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 280px;
+            height: 280px;
+            border: 3px solid rgba(102, 126, 234, 0.5);
+            border-radius: 20px;
+            pointer-events: none;
+        }
+
+        .detection-zone::before,
+        .detection-zone::after,
+        .corner-tl::before,
+        .corner-tr::before {
+            content: '';
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border: 4px solid #667eea;
+        }
+
+        .detection-zone::before {
+            top: -4px;
+            left: -4px;
+            border-right: none;
+            border-bottom: none;
+            border-radius: 20px 0 0 0;
+        }
+
+        .detection-zone::after {
+            top: -4px;
+            right: -4px;
+            border-left: none;
+            border-bottom: none;
+            border-radius: 0 20px 0 0;
+        }
+
+        .corner-tl::before {
+            bottom: -4px;
+            left: -4px;
+            border-right: none;
+            border-top: none;
+            border-radius: 0 0 0 20px;
+        }
+
+        .corner-tr::before {
+            bottom: -4px;
+            right: -4px;
+            border-left: none;
+            border-top: none;
+            border-radius: 0 0 20px 0;
+        }
+
+        /* Bottom Info Panel */
+        .bottom-panel {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 30px 20px env(safe-area-inset-bottom, 30px);
+            background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+            pointer-events: all;
+        }
+
+        .detected-object-card {
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border: 1px solid rgba(255,255,255,0.2);
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .object-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .object-emoji {
+            font-size: 32px;
+        }
+
+        .object-name {
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            flex: 1;
+        }
+
+        .confidence-badge {
+            background: rgba(16, 185, 129, 0.9);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 15px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .object-description {
+            color: rgba(255,255,255,0.8);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        /* Toggle UI Button */
+        .toggle-ui-btn {
+            position: fixed;
+            bottom: env(safe-area-inset-bottom, 30px);
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            border-radius: 30px;
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            z-index: 20;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .toggle-ui-btn:active {
+            transform: scale(0.9);
+        }
+
+        /* Start Screen */
+        #startScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9998;
+            padding: 20px;
+            text-align: center;
+            color: white;
+        }
+
+        .start-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .start-title {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .start-subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 40px;
+        }
+
+        .start-btn {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 18px 40px;
+            border-radius: 30px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        }
+
+        .start-btn:active {
+            transform: scale(0.95);
+        }
+
+        .permission-note {
+            margin-top: 30px;
+            font-size: 14px;
+            opacity: 0.8;
+            max-width: 300px;
+        }
+
+        .hidden-screen {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- Start Screen -->
+    <div id="startScreen">
+        <div class="start-icon">📱</div>
+        <div class="start-title">AI Object Scanner</div>
+        <div class="start-subtitle">Deteksi objek di sekitar Anda dengan AI</div>
+        <button class="start-btn" onclick="initApp()">🚀 Mulai Scan</button>
+        <div class="permission-note">
+            ⚠️ Aplikasi ini memerlukan akses kamera. Pastikan Anda menggunakan HTTPS dan memberikan izin kamera.
+        </div>
+    </div>
+
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="hidden-screen">
+        <div class="loader"></div>
+        <div style="font-size: 18px; font-weight: bold;">Memuat AI Model...</div>
+        <div style="font-size: 14px; opacity: 0.8; margin-top: 10px;">Mohon tunggu sebentar</div>
+    </div>
+
+    <!-- Video Container -->
+    <div id="videoContainer" style="display: none;">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <!-- UI Overlay -->
+    <div id="uiOverlay">
+        <div class="top-bar">
+            <div class="fps-badge" id="fps">0 FPS</div>
+            <button class="camera-switch" onclick="switchCamera()">🔄</button>
+        </div>
+
+        <div class="detection-zone">
+            <div class="corner-tl"></div>
+            <div class="corner-tr"></div>
+        </div>
+
+        <div class="bottom-panel" id="bottomPanel">
+            <div id="objectInfo" style="color: rgba(255,255,255,0.6); text-align: center; font-size: 16px;">
+                👆 Arahkan kamera ke objek untuk mendeteksi
+            </div>
+        </div>
+    </div>
+
+    <!-- Toggle UI Button -->
+    <button class="toggle-ui-btn" id="toggleBtn" onclick="toggleUI()" style="display: none;">👁️</button>
+
+    <script>
+        let video, canvas, ctx;
+        let model = null;
+        let isDetecting = false;
+        let currentStream = null;
+        let facingMode = 'environment';
+        let lastTime = Date.now();
+        let uiVisible = true;
+
+        const objectDescriptions = {
+            'person': 'Manusia terdeteksi',
+            'cell phone': 'Smartphone atau telepon genggam',
+            'laptop': 'Komputer laptop atau notebook',
+            'mouse': 'Perangkat mouse komputer',
+            'keyboard': 'Papan ketik komputer',
+            'tv': 'Televisi atau layar monitor',
+            'remote': 'Remote control TV/AC',
+            'cup': 'Cangkir atau gelas minum',
+            'bottle': 'Botol minuman',
+            'wine glass': 'Gelas wine atau gelas tinggi',
+            'bowl': 'Mangkuk atau wadah',
+            'book': 'Buku atau dokumen',
+            'clock': 'Jam dinding atau jam meja',
+            'vase': 'Vas bunga atau hiasan',
+            'chair': 'Kursi tempat duduk',
+            'couch': 'Sofa atau kursi panjang',
+            'potted plant': 'Tanaman dalam pot',
+            'bed': 'Kasur atau tempat tidur',
+            'dining table': 'Meja makan',
+            'toilet': 'Toilet atau WC',
+            'microwave': 'Oven microwave',
+            'oven': 'Oven pemanggang',
+            'toaster': 'Pemanggang roti',
+            'sink': 'Wastafel atau bak cuci',
+            'refrigerator': 'Lemari es atau kulkas',
+            'scissors': 'Gunting',
+            'teddy bear': 'Boneka beruang',
+            'hair drier': 'Pengering rambut',
+            'toothbrush': 'Sikat gigi',
+            'backpack': 'Tas ransel',
+            'umbrella': 'Payung',
+            'handbag': 'Tas tangan',
+            'tie': 'Dasi',
+            'suitcase': 'Koper',
+            'car': 'Mobil atau kendaraan',
+            'bicycle': 'Sepeda',
+            'motorcycle': 'Motor atau sepeda motor',
+            'airplane': 'Pesawat terbang',
+            'bus': 'Bus',
+            'train': 'Kereta api',
+            'truck': 'Truk',
+            'dog': 'Anjing',
+            'cat': 'Kucing',
+            'bird': 'Burung'
+        };
+
+        const emojiMap = {
+            'person': '👤',
+            'cell phone': '📱',
+            'laptop': '💻',
+            'mouse': '🖱️',
+            'keyboard': '⌨️',
+            'tv': '📺',
+            'remote': '📱',
+            'cup': '☕',
+            'bottle': '🍾',
+            'wine glass': '🍷',
+            'bowl': '🥣',
+            'book': '📚',
+            'clock': '⏰',
+            'vase': '🏺',
+            'chair': '🪑',
+            'couch': '🛋️',
+            'potted plant': '🪴',
+            'bed': '🛏️',
+            'dining table': '🍽️',
+            'toilet': '🚽',
+            'microwave': '📟',
+            'oven': '🔥',
+            'toaster': '🍞',
+            'sink': '🚰',
+            'refrigerator': '🧊',
+            'scissors': '✂️',
+            'teddy bear': '🧸',
+            'hair drier': '💇',
+            'toothbrush': '🪥',
+            'backpack': '🎒',
+            'umbrella': '☂️',
+            'handbag': '👜',
+            'tie': '👔',
+            'suitcase': '🧳',
+            'car': '🚗',
+            'bicycle': '🚲',
+            'motorcycle': '🏍️',
+            'airplane': '✈️',
+            'bus': '🚌',
+            'train': '🚂',
+            'truck': '🚚',
+            'dog': '🐕',
+            'cat': '🐱',
+            'bird': '🐦'
+        };
+
+        async function initApp() {
+            document.getElementById('startScreen').classList.add('hidden-screen');
+            document.getElementById('loadingScreen').classList.remove('hidden-screen');
+
+            try {
+                await loadModel();
+                await startCamera();
+                
+                document.getElementById('loadingScreen').classList.add('hidden-screen');
+                document.getElementById('videoContainer').style.display = 'block';
+                document.getElementById('toggleBtn').style.display = 'flex';
+                
+                isDetecting = true;
+                detectFrame();
+            } catch (error) {
+                alert('Error: ' + error.message + '\n\nPastikan:\n1. Menggunakan HTTPS\n2. Memberikan izin kamera\n3. Browser mendukung kamera');
+                document.getElementById('loadingScreen').classList.add('hidden-screen');
+                document.getElementById('startScreen').classList.remove('hidden-screen');
+            }
+        }
+
+        async function loadModel() {
+            console.log('Loading COCO-SSD model...');
+            model = await cocoSsd.load({
+                base: 'mobilenet_v2'
+            });
+            console.log('Model loaded!');
+        }
+
+        async function startCamera() {
+            video = document.getElementById('video');
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+
+            const constraints = {
+                video: {
+                    facingMode: facingMode,
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                }
+            };
+
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = currentStream;
+
+            video.onloadedmetadata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+            };
+        }
+
+        async function switchCamera() {
+            facingMode = facingMode === 'environment' ? 'user' : 'environment';
+            await startCamera();
+        }
+
+        async function detectFrame() {
+            if (!isDetecting) return;
+
+            const now = Date.now();
+            const fps = Math.round(1000 / (now - lastTime));
+            lastTime = now;
+            document.getElementById('fps').textContent = fps + ' FPS';
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            try {
+                const predictions = await model.detect(video);
+                
+                let mainObject = null;
+                let maxArea = 0;
+
+                predictions.forEach(prediction => {
+                    const [x, y, width, height] = prediction.bbox;
+                    const area = width * height;
+                    
+                    const scaleX = canvas.width / video.videoWidth;
+                    const scaleY = canvas.height / video.videoHeight;
+                    
+                    const scaledX = x * scaleX;
+                    const scaledY = y * scaleY;
+                    const scaledWidth = width * scaleX;
+                    const scaledHeight = height * scaleY;
+
+                    drawBox(scaledX, scaledY, scaledWidth, scaledHeight, prediction.class, prediction.score);
+
+                    if (area > maxArea) {
+                        maxArea = area;
+                        mainObject = prediction;
+                    }
+                });
+
+                updateObjectInfo(mainObject);
+
+            } catch (error) {
+                console.error('Detection error:', error);
+            }
+
+            requestAnimationFrame(detectFrame);
+        }
+
+        function drawBox(x, y, width, height, label, confidence) {
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(x, y, width, height);
+
+            const text = `${label} ${(confidence * 100).toFixed(0)}%`;
+            ctx.font = 'bold 24px Arial';
+            const textWidth = ctx.measureText(text).width;
+            
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.9)';
+            ctx.fillRect(x, y - 40, textWidth + 30, 40);
+
+            ctx.fillStyle = 'white';
+            ctx.fillText(text, x + 15, y - 12);
+
+            const cornerLength = 30;
+            ctx.lineWidth = 6;
+            
+            ctx.beginPath();
+            ctx.moveTo(x, y + cornerLength);
+            ctx.lineTo(x, y);
+            ctx.lineTo(x + cornerLength, y);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(x + width - cornerLength, y);
+            ctx.lineTo(x + width, y);
+            ctx.lineTo(x + width, y + cornerLength);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(x, y + height - cornerLength);
+            ctx.lineTo(x, y + height);
+            ctx.lineTo(x + cornerLength, y + height);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(x + width - cornerLength, y + height);
+            ctx.lineTo(x + width, y + height);
+            ctx.lineTo(x + width, y + height - cornerLength);
+            ctx.stroke();
+        }
+
+        function updateObjectInfo(object) {
+            const infoDiv = document.getElementById('objectInfo');
+            
+            if (!object) {
+                infoDiv.innerHTML = '<div style="color: rgba(255,255,255,0.6); text-align: center; font-size: 16px;">👆 Arahkan kamera ke objek untuk mendeteksi</div>';
+                return;
+            }
+
+            const emoji = emojiMap[object.class] || '📦';
+            const description = objectDescriptions[object.class] || 'Objek terdeteksi';
+            const confidence = (object.score * 100).toFixed(0);
+
+            infoDiv.innerHTML = `
+                <div class="detected-object-card">
+                    <div class="object-title">
+                        <div class="object-emoji">${emoji}</div>
+                        <div class="object-name">${object.class.toUpperCase()}</div>
+                        <div class="confidence-badge">${confidence}%</div>
+                    </div>
+                    <div class="object-description">${description}</div>
+                </div>
+            `;
+        }
+
+        function toggleUI() {
+            uiVisible = !uiVisible;
+            const overlay = document.getElementById('uiOverlay');
+            const btn = document.getElementById('toggleBtn');
+            
+            if (uiVisible) {
+                overlay.classList.remove('hidden');
+                btn.textContent = '👁️';
+            } else {
+                overlay.classList.add('hidden');
+                btn.textContent = '👁️‍🗨️';
+            }
+        }
+
+        // Prevent screen sleep
+        let wakeLock = null;
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                }
+            } catch (err) {
+                console.log('Wake Lock error:', err);
+            }
+        }
+
+        // Auto-hide UI after 5 seconds of no interaction
+        let hideTimer;
+        function resetHideTimer() {
+            clearTimeout(hideTimer);
+            if (uiVisible) {
+                document.getElementById('uiOverlay').classList.remove('hidden');
+            }
+            hideTimer = setTimeout(() => {
+                if (uiVisible && isDetecting) {
+                    document.getElementById('uiOverlay').classList.add('hidden');
+                }
+            }, 5000);
+        }
+
+        document.addEventListener('touchstart', resetHideTimer);
+        document.addEventListener('click', resetHideTimer);
+
+        // Request wake lock when app starts
+        window.addEventListener('load', () => {
+            requestWakeLock();
+        });
+    </script>
+</body>
+</html>
