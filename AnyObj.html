@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>AI Detector Mobile</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: fixed;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        #videoContainer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+
+        #video {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: cover;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+            padding: 20px 20px 60px;
+            pointer-events: all;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(16, 185, 129, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            backdrop-filter: blur(10px);
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            background: white;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .detection-info {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.95), rgba(0,0,0,0.7) 70%, transparent);
+            padding: 40px 20px 30px;
+            pointer-events: all;
+        }
+
+        .main-object {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .object-icon {
+            font-size: 64px;
+            margin-bottom: 10px;
+            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5));
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .object-name {
+            font-size: 32px;
+            font-weight: 700;
+            color: white;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+            margin-bottom: 5px;
+        }
+
+        .object-confidence {
+            font-size: 18px;
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        .object-description {
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            margin-top: 8px;
+            line-height: 1.4;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .stat-item {
+            flex: 1;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: white;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: rgba(255,255,255,0.6);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .other-objects {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .object-chip {
+            background: rgba(99, 102, 241, 0.9);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 13px;
+            font-weight: 600;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            z-index: 20;
+            pointer-events: all;
+        }
+
+        .control-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(10px);
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid rgba(255,255,255,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .control-btn:active {
+            transform: scale(0.9);
+        }
+
+        .control-btn.primary {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #10b981, #059669);
+            border-color: rgba(255,255,255,0.4);
+        }
+
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            transition: opacity 0.5s;
+        }
+
+        .loading-screen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loader {
+            width: 80px;
+            height: 80px;
+            border: 6px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: white;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .fps-badge {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            color: #10b981;
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+            backdrop-filter: blur(10px);
+        }
+
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px;
+            height: 200px;
+            border: 2px solid rgba(16, 185, 129, 0.5);
+            border-radius: 20px;
+            pointer-events: none;
+        }
+
+        .crosshair::before,
+        .crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(16, 185, 129, 0.5);
+        }
+
+        .crosshair::before {
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 2px;
+        }
+
+        .crosshair::after {
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 2px;
+            height: 20px;
+        }
+
+        .corner {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border: 3px solid #10b981;
+        }
+
+        .corner.tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+        .corner.tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+        .corner.bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+        .corner.br { bottom: 0; right: 0; border-left: none; border-top: none; }
+    </style>
+</head>
+<body>
+    <div class="loading-screen" id="loadingScreen">
+        <div class="loader"></div>
+        <div class="loading-text">Memuat AI Model...</div>
+    </div>
+
+    <div id="videoContainer">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <div class="crosshair">
+            <div class="corner tl"></div>
+            <div class="corner tr"></div>
+            <div class="corner bl"></div>
+            <div class="corner br"></div>
+        </div>
+    </div>
+
+    <div class="overlay">
+        <div class="top-bar">
+            <div class="status-badge">
+                <div class="pulse"></div>
+                AI AKTIF
+            </div>
+            <div class="fps-badge" id="fps">0 FPS</div>
+        </div>
+
+        <div class="detection-info" id="detectionInfo">
+            <div class="main-object" id="mainObject">
+                <div class="object-icon">🔍</div>
+                <div class="object-name">Arahkan ke Objek</div>
+                <div class="object-confidence">Mulai deteksi untuk melihat</div>
+            </div>
+
+            <div class="stats-row">
+                <div class="stat-item">
+                    <div class="stat-value" id="objectCount">0</div>
+                    <div class="stat-label">Objek</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="accuracy">0%</div>
+                    <div class="stat-label">Akurasi</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="distance">-</div>
+                    <div class="stat-label">Jarak</div>
+                </div>
+            </div>
+
+            <div class="other-objects" id="otherObjects"></div>
+        </div>
+    </div>
+
+    <script>
+        let video, canvas, ctx;
+        let cocoModel, mobileNetModel;
+        let isDetecting = false;
+        let lastTime = Date.now();
+        let detectionHistory = [];
+        const MAX_HISTORY = 5;
+
+        const objectDatabase = {
+            'cup': { emoji: '☕', name: 'Cangkir/Gelas', desc: 'Wadah untuk minum' },
+            'bottle': { emoji: '🍾', name: 'Botol', desc: 'Botol plastik atau kaca' },
+            'wine glass': { emoji: '🍷', name: 'Gelas Wine', desc: 'Gelas kaca untuk minuman' },
+            'tv': { emoji: '📺', name: 'Televisi', desc: 'Layar TV atau monitor' },
+            'laptop': { emoji: '💻', name: 'Laptop', desc: 'Komputer portable' },
+            'mouse': { emoji: '🖱️', name: 'Mouse', desc: 'Perangkat input komputer' },
+            'keyboard': { emoji: '⌨️', name: 'Keyboard', desc: 'Papan ketik' },
+            'cell phone': { emoji: '📱', name: 'Handphone', desc: 'Telepon genggam' },
+            'book': { emoji: '📚', name: 'Buku', desc: 'Buku atau majalah' },
+            'clock': { emoji: '⏰', name: 'Jam', desc: 'Penunjuk waktu' },
+            'vase': { emoji: '🏺', name: 'Vas', desc: 'Wadah untuk bunga' },
+            'scissors': { emoji: '✂️', name: 'Gunting', desc: 'Alat pemotong' },
+            'chair': { emoji: '🪑', name: 'Kursi', desc: 'Tempat duduk' },
+            'couch': { emoji: '🛋️', name: 'Sofa', desc: 'Tempat duduk panjang' },
+            'bed': { emoji: '🛏️', name: 'Kasur/Tempat Tidur', desc: 'Tempat untuk tidur' },
+            'dining table': { emoji: '🍽️', name: 'Meja Makan', desc: 'Meja untuk makan' },
+            'potted plant': { emoji: '🪴', name: 'Tanaman Pot', desc: 'Tanaman dalam pot' },
+            'refrigerator': { emoji: '🧊', name: 'Kulkas', desc: 'Pendingin makanan' },
+            'microwave': { emoji: '📟', name: 'Microwave', desc: 'Pemanas makanan' },
+            'oven': { emoji: '🔥', name: 'Oven', desc: 'Alat pemanggang' },
+            'sink': { emoji: '🚰', name: 'Wastafel', desc: 'Tempat cuci' },
+            'toilet': { emoji: '🚽', name: 'Toilet', desc: 'WC' },
+            'remote': { emoji: '📱', name: 'Remote Control', desc: 'Pengendali jarak jauh' },
+            'person': { emoji: '👤', name: 'Orang', desc: 'Manusia terdeteksi' },
+            'backpack': { emoji: '🎒', name: 'Tas Ransel', desc: 'Tas punggung' },
+            'umbrella': { emoji: '☂️', name: 'Payung', desc: 'Pelindung hujan' },
+            'handbag': { emoji: '👜', name: 'Tas Tangan', desc: 'Tas genggam' },
+            'tie': { emoji: '👔', name: 'Dasi', desc: 'Aksesoris leher' },
+            'suitcase': { emoji: '🧳', name: 'Koper', desc: 'Tas bepergian' },
+            'car': { emoji: '🚗', name: 'Mobil', desc: 'Kendaraan roda empat' },
+            'motorcycle': { emoji: '🏍️', name: 'Motor', desc: 'Kendaraan roda dua' },
+            'bicycle': { emoji: '🚲', name: 'Sepeda', desc: 'Sepeda kayuh' },
+            'airplane': { emoji: '✈️', name: 'Pesawat', desc: 'Pesawat terbang' },
+            'bus': { emoji: '🚌', name: 'Bus', desc: 'Kendaraan umum' },
+            'train': { emoji: '🚂', name: 'Kereta', desc: 'Kereta api' },
+            'truck': { emoji: '🚚', name: 'Truk', desc: 'Kendaraan angkut' },
+            'cat': { emoji: '🐱', name: 'Kucing', desc: 'Hewan peliharaan' },
+            'dog': { emoji: '🐕', name: 'Anjing', desc: 'Hewan peliharaan' },
+            'bird': { emoji: '🐦', name: 'Burung', desc: 'Hewan terbang' }
+        };
+
+        async function initApp() {
+            try {
+                document.getElementById('loadingScreen').querySelector('.loading-text').textContent = 'Memuat AI Model...';
+                await loadModels();
+                
+                document.getElementById('loadingScreen').querySelector('.loading-text').textContent = 'Meminta Akses Kamera...';
+                await startCamera();
+                
+                enterFullscreen();
+                
+                setTimeout(() => {
+                    document.getElementById('loadingScreen').classList.add('hidden');
+                    startDetection();
+                }, 500);
+            } catch (error) {
+                console.error('Init error:', error);
+                showError(error.message);
+            }
+        }
+
+        function enterFullscreen() {
+            setTimeout(() => {
+                const elem = document.documentElement;
+                if (elem.requestFullscreen) {
+                    elem.requestFullscreen().catch(e => console.log('Fullscreen tidak didukung'));
+                } else if (elem.webkitRequestFullscreen) {
+                    elem.webkitRequestFullscreen().catch(e => console.log('Fullscreen tidak didukung'));
+                } else if (elem.msRequestFullscreen) {
+                    elem.msRequestFullscreen().catch(e => console.log('Fullscreen tidak didukung'));
+                }
+            }, 500);
+        }
+
+        async function loadModels() {
+            cocoModel = await cocoSsd.load();
+            mobileNetModel = await mobilenet.load();
+        }
+
+        async function startCamera() {
+            video = document.getElementById('video');
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+
+            try {
+                // Try dengan kamera belakang dulu
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: 'environment' },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: false
+                });
+
+                video.srcObject = stream;
+                
+                return new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        canvas.width = window.innerWidth;
+                        canvas.height = window.innerHeight;
+                        resolve();
+                    };
+                });
+            } catch (error) {
+                console.error('Camera error:', error);
+                
+                // Fallback: coba kamera depan
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            facingMode: 'user',
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        },
+                        audio: false
+                    });
+
+                    video.srcObject = stream;
+                    
+                    return new Promise((resolve) => {
+                        video.onloadedmetadata = () => {
+                            video.play();
+                            canvas.width = window.innerWidth;
+                            canvas.height = window.innerHeight;
+                            resolve();
+                        };
+                    });
+                } catch (fallbackError) {
+                    throw new Error('Tidak dapat mengakses kamera. Pastikan Anda mengizinkan akses kamera di browser.');
+                }
+            }
+        }
+
+        function showError(message) {
+            const loadingScreen = document.getElementById('loadingScreen');
+            loadingScreen.innerHTML = `
+                <div style="text-align: center; padding: 30px;">
+                    <div style="font-size: 64px; margin-bottom: 20px;">⚠️</div>
+                    <div style="color: white; font-size: 20px; font-weight: 600; margin-bottom: 15px;">
+                        Gagal Mengakses Kamera
+                    </div>
+                    <div style="color: rgba(255,255,255,0.8); font-size: 14px; line-height: 1.6; margin-bottom: 25px; max-width: 300px;">
+                        ${message}
+                    </div>
+                    <button onclick="location.reload()" style="
+                        background: white;
+                        color: #667eea;
+                        border: none;
+                        padding: 12px 30px;
+                        border-radius: 25px;
+                        font-size: 16px;
+                        font-weight: 600;
+                        cursor: pointer;
+                    ">
+                        🔄 Coba Lagi
+                    </button>
+                    <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-top: 20px; line-height: 1.5;">
+                        Pastikan:<br>
+                        • Browser memiliki izin kamera<br>
+                        • Menggunakan HTTPS/localhost<br>
+                        • Kamera tidak digunakan aplikasi lain
+                    </div>
+                </div>
+            `;
+        }
+
+        function startDetection() {
+            isDetecting = true;
+            detectFrame();
+        }
+
+        async function detectFrame() {
+            if (!isDetecting) return;
+
+            const now = Date.now();
+            const fps = Math.round(1000 / (now - lastTime));
+            lastTime = now;
+            document.getElementById('fps').textContent = fps + ' FPS';
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            try {
+                const predictions = await cocoModel.detect(video);
+                
+                let mainObject = null;
+                let maxArea = 0;
+
+                predictions.forEach(pred => {
+                    const [x, y, width, height] = pred.bbox;
+                    const area = width * height;
+                    
+                    const scaleX = canvas.width / video.videoWidth;
+                    const scaleY = canvas.height / video.videoHeight;
+                    const scaledX = x * scaleX;
+                    const scaledY = y * scaleY;
+                    const scaledW = width * scaleX;
+                    const scaledH = height * scaleY;
+
+                    drawBox(scaledX, scaledY, scaledW, scaledH, pred.class, pred.score);
+
+                    if (area > maxArea) {
+                        maxArea = area;
+                        mainObject = {
+                            class: pred.class,
+                            score: pred.score,
+                            size: area
+                        };
+                    }
+                });
+
+                updateUI(mainObject, predictions);
+
+            } catch (error) {
+                console.error('Detection error:', error);
+            }
+
+            requestAnimationFrame(detectFrame);
+        }
+
+        function drawBox(x, y, width, height, label, confidence) {
+            const color = '#10b981';
+            
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 4;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 10;
+            ctx.strokeRect(x, y, width, height);
+            ctx.shadowBlur = 0;
+
+            const cornerSize = 25;
+            ctx.lineWidth = 5;
+            
+            // Corners
+            [[x, y, x+cornerSize, y, x, y+cornerSize],
+             [x+width-cornerSize, y, x+width, y, x+width, y+cornerSize],
+             [x, y+height-cornerSize, x, y+height, x+cornerSize, y+height],
+             [x+width, y+height-cornerSize, x+width, y+height, x+width-cornerSize, y+height]
+            ].forEach(pts => {
+                ctx.beginPath();
+                ctx.moveTo(pts[0], pts[1]);
+                ctx.lineTo(pts[2], pts[3]);
+                ctx.lineTo(pts[4], pts[5]);
+                ctx.stroke();
+            });
+
+            const info = objectDatabase[label] || { name: label };
+            const text = info.name;
+            ctx.font = 'bold 18px -apple-system, sans-serif';
+            const textWidth = ctx.measureText(text).width;
+            
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y - 35, textWidth + 24, 35);
+            
+            ctx.fillStyle = 'white';
+            ctx.fillText(text, x + 12, y - 12);
+        }
+
+        function updateUI(mainObject, allPredictions) {
+            const mainEl = document.getElementById('mainObject');
+            const otherEl = document.getElementById('otherObjects');
+            
+            if (mainObject) {
+                detectionHistory.push(mainObject);
+                if (detectionHistory.length > MAX_HISTORY) {
+                    detectionHistory.shift();
+                }
+
+                const stable = getMostFrequent(detectionHistory);
+                const info = objectDatabase[stable.class] || { 
+                    emoji: '📦', 
+                    name: stable.class, 
+                    desc: 'Objek terdeteksi' 
+                };
+
+                const distance = estimateDistance(stable.size);
+                
+                mainEl.innerHTML = `
+                    <div class="object-icon">${info.emoji}</div>
+                    <div class="object-name">${info.name}</div>
+                    <div class="object-confidence">${(stable.score * 100).toFixed(0)}% Yakin</div>
+                    <div class="object-description">${info.desc}</div>
+                `;
+
+                document.getElementById('objectCount').textContent = allPredictions.length;
+                document.getElementById('accuracy').textContent = (stable.score * 100).toFixed(0) + '%';
+                document.getElementById('distance').textContent = distance;
+
+                otherEl.innerHTML = allPredictions
+                    .filter(p => p.class !== stable.class)
+                    .slice(0, 5)
+                    .map(p => {
+                        const info = objectDatabase[p.class] || { emoji: '📦', name: p.class };
+                        return `<div class="object-chip">${info.emoji} ${info.name}</div>`;
+                    })
+                    .join('');
+            } else {
+                mainEl.innerHTML = `
+                    <div class="object-icon">🔍</div>
+                    <div class="object-name">Arahkan ke Objek</div>
+                    <div class="object-confidence">Tidak ada objek terdeteksi</div>
+                `;
+                otherEl.innerHTML = '';
+                document.getElementById('objectCount').textContent = '0';
+                document.getElementById('accuracy').textContent = '0%';
+                document.getElementById('distance').textContent = '-';
+            }
+        }
+
+        function getMostFrequent(arr) {
+            const freq = {};
+            arr.forEach(item => {
+                const key = item.class;
+                freq[key] = (freq[key] || 0) + 1;
+            });
+            
+            let maxFreq = 0;
+            let mostFrequent = arr[arr.length - 1];
+            
+            for (let key in freq) {
+                if (freq[key] > maxFreq) {
+                    maxFreq = freq[key];
+                    mostFrequent = arr.find(item => item.class === key);
+                }
+            }
+            
+            return mostFrequent;
+        }
+
+        function estimateDistance(area) {
+            const videoArea = video.videoWidth * video.videoHeight;
+            const ratio = area / videoArea;
+            
+            if (ratio > 0.3) return 'Sangat Dekat';
+            if (ratio > 0.15) return 'Dekat';
+            if (ratio > 0.05) return 'Sedang';
+            return 'Jauh';
+        }
+
+        window.addEventListener('load', initApp);
+        
+        document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+    </script>
+</body>
+</html>
